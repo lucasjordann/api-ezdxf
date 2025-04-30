@@ -63,8 +63,10 @@ def mudar_cor_todos(msp, cor: int = 7):
 def executar_acoes(doc, msp, acoes: List[Acao]):
     for acao in acoes:
         if acao.tipo == "criar_layer" and acao.nome:
-            if acao.nome not in doc.layers:
-                doc.layers.new(name=acao.nome, dxfattribs={"color": acao.cor or 7})
+    if acao.nome not in doc.layers:
+        doc.layers.new(name=acao.nome, dxfattribs={"color": acao.cor or 7})
+        # adiciona uma entidade mínima só para registrar a layer
+        msp.add_point((0, 0), dxfattribs={"layer": acao.nome})
 
         elif acao.tipo == "desenhar_linha" and acao.inicio and acao.fim:
             msp.add_line(acao.inicio, acao.fim, dxfattribs={"layer": acao.layer or "0"})
