@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import ezdxf, requests, os, base64, re, json
@@ -16,6 +16,7 @@ class DXFUrlRequest(BaseModel):
     file_url: str
     instrucoes: Optional[str] = None
 
+# 🧠 Registrar cada comando em tempo real
 def registrar_aprendizado(comando: str, detalhes: str):
     br_tz = pytz.timezone("America/Sao_Paulo")
     registro = {
@@ -26,6 +27,7 @@ def registrar_aprendizado(comando: str, detalhes: str):
     with open(KNOWLEDGE_PATH, "a") as f:
         f.write(json.dumps(registro) + "\n")
 
+# 🎯 Executores
 def explodir_blocos(msp):
     blocos_explodidos = 0
     for entidade in list(msp):
@@ -48,6 +50,7 @@ def mudar_cor_todos(msp, cor: int = 7):
             alterados += 1
     return alterados
 
+# 🚀 Executor principal de instruções
 @app.post("/modificar_dxf_url/")
 def modificar_dxf_url(data: DXFUrlRequest):
     temp_dir = "/tmp/dxf_api"
@@ -89,14 +92,14 @@ def modificar_dxf_url(data: DXFUrlRequest):
             if match_cor:
                 cor = int(match_cor.group(1))
                 total = mudar_cor_todos(msp, cor)
-                registrar_aprendizado(f"mudar cor de todos os itens para {cor}", f"{total} entidades alteradas para cor {cor}")
+                registrar_aprendizado(f"mudar cor de todos os itens para {cor}", f"{total} entidades alteradas")
 
         doc.saveas(modified_path)
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro ao processar DXF: {str(e)}"})
 
-    # Etapa 3 – Upload para GitHub
+    # Etapa 3 – Upload
     try:
         with open(modified_path, "rb") as f:
             content_b64 = base64.b64encode(f.read()).decode()
@@ -126,3 +129,27 @@ def modificar_dxf_url(data: DXFUrlRequest):
         "mensagem": "Arquivo modificado com sucesso",
         "download_url": raw_url
     })
+
+# 🔁 Execução baseada no que foi aprendido
+@app.post("/executar_comando/")
+def executar_comando(data: dict):
+    file_url = data.get("file_url")
+    comando = data.get("comando")
+
+    if not file_url or not comando:
+        return JSONResponse(status_code=400, content={"error": "Campos 'file_url' e 'comando' são obrigatórios."})
+
+    etapas = []
+    if os.path.exists(KNOWLEDGE_PATH):
+        with open(KNOWLEDGE_PATH, "r") as f:
+            for linha in f:
+                registro = json.loads(linha)
+                if registro.get("comando") == comando and "etapas" in registro:
+                    etapas = registro["etapas"]
+                    break
+
+    if not etapas:
+        return JSONResponse(status_code=404, content={"error": f"Comando '{comando}' ainda não tem etapas definidas."})
+
+    instrucoes_txt = ", ".join(etapas)
+    return modificar_dxf_url(DXFUrlRequest(file_url=file_url, instrucoes=instrucoes_txt))
