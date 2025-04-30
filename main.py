@@ -43,20 +43,18 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro ao modificar/salvar DXF: {str(e)}"})
 
-    # 🔽 Etapa 5: upload para file.io
+    # 🔽 Etapa 5: upload para transfer.sh
     try:
         with open(modified_path, "rb") as file:
-            upload = requests.post("https://file.io", files={"file": file})
+            upload = requests.put("https://transfer.sh/modificado.dxf", data=file)
         if upload.status_code != 200:
-            return JSONResponse(status_code=500, content={"error": f"Erro ao fazer upload: status {upload.status_code}"})
-        upload_data = upload.json()
-        if not upload_data.get("success"):
-            return JSONResponse(status_code=500, content={"error": "Upload falhou", "detalhes": upload_data})
+            return JSONResponse(status_code=500, content={"error": f"Erro no upload: {upload.status_code}"})
+        upload_url = upload.text.strip()
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro durante upload: {str(e)}"})
 
     # 🔽 Sucesso!
     return JSONResponse(content={
         "mensagem": "Arquivo modificado com sucesso",
-        "download_url": upload_data["link"]
+        "download_url": upload_url
     })
