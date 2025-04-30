@@ -2,14 +2,13 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import ezdxf, requests, os, base64
+from datetime import datetime
 
 app = FastAPI()
 
-# Configurações do GitHub
+# Configuração fixa do repositório
 GITHUB_REPO = "lucasjordann/api-ezdxf"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/saida.dxf"
-RAW_URL = "https://raw.githubusercontent.com/lucasjordann/api-ezdxf/main/saida.dxf"
 
 class DXFUrlRequest(BaseModel):
     file_url: str
@@ -18,10 +17,16 @@ class DXFUrlRequest(BaseModel):
 def modificar_dxf_url(data: DXFUrlRequest):
     temp_dir = "/tmp/dxf_api"
     os.makedirs(temp_dir, exist_ok=True)
-    original_path = os.path.join(temp_dir, "baixado.dxf")
-    modified_path = os.path.join(temp_dir, "saida.dxf")
 
-    # Etapa 1 – Download
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"saida_{timestamp}.dxf"
+
+    original_path = os.path.join(temp_dir, "baixado.dxf")
+    modified_path = os.path.join(temp_dir, filename)
+    github_api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
+
+    # Etapa 1 – Baixar DXF original
     try:
         response = requests.get(data.file_url)
         if response.status_code != 200:
@@ -31,7 +36,7 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Falha ao baixar arquivo: {str(e)}"})
 
-    # Etapa 2 – Modificação com ezdxf
+    # Etapa 2 – Modificar com ezdxf
     try:
         doc = ezdxf.readfile(original_path)
         msp = doc.modelspace()
@@ -50,18 +55,13 @@ def modificar_dxf_url(data: DXFUrlRequest):
             "Accept": "application/vnd.github.v3+json"
         }
 
-        get_resp = requests.get(GITHUB_API_URL, headers=headers)
-        sha = get_resp.json().get("sha", None)
-
         payload = {
-            "message": "upload automático do DXF modificado",
+            "message": f"upload {filename}",
             "content": content_b64,
             "branch": "main"
         }
-        if sha:
-            payload["sha"] = sha
 
-        put_resp = requests.put(GITHUB_API_URL, json=payload, headers=headers)
+        put_resp = requests.put(github_api_url, json=payload, headers=headers)
         if put_resp.status_code not in [200, 201]:
             return JSONResponse(status_code=500, content={
                 "error": "Erro ao fazer upload para GitHub",
@@ -71,8 +71,8 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro durante upload para GitHub: {str(e)}"})
 
-    # ✅ Etapa final – Retornar o link público
+    # ✅ Etapa final – Retorna link único para o .dxf
     return JSONResponse(content={
         "mensagem": "Arquivo modificado com sucesso",
-        "download_url": RAW_URL
+        "download_url": raw_url
     })
