@@ -1,11 +1,11 @@
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import ezdxf, requests, os, base64, time
+import ezdxf, requests, os, base64
 
 app = FastAPI()
 
-# Variáveis do GitHub
+# Configurações do GitHub
 GITHUB_REPO = "lucasjordann/api-ezdxf"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/saida.dxf"
@@ -21,7 +21,7 @@ def modificar_dxf_url(data: DXFUrlRequest):
     original_path = os.path.join(temp_dir, "baixado.dxf")
     modified_path = os.path.join(temp_dir, "saida.dxf")
 
-    # Etapa 1 – Download do arquivo original
+    # Etapa 1 – Download
     try:
         response = requests.get(data.file_url)
         if response.status_code != 200:
@@ -31,7 +31,7 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Falha ao baixar arquivo: {str(e)}"})
 
-    # Etapa 2 – Modificar com ezdxf
+    # Etapa 2 – Modificação com ezdxf
     try:
         doc = ezdxf.readfile(original_path)
         msp = doc.modelspace()
@@ -67,17 +67,12 @@ def modificar_dxf_url(data: DXFUrlRequest):
                 "error": "Erro ao fazer upload para GitHub",
                 "detalhes": put_resp.json()
             })
+
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro durante upload para GitHub: {str(e)}"})
 
-    # Etapa 4 – Baixar novamente da URL raw do GitHub
-    try:
-        final_path = os.path.join(temp_dir, "final_saida.dxf")
-        raw_response = requests.get(RAW_URL)
-        with open(final_path, "wb") as f:
-            f.write(raw_response.content)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erro ao baixar do GitHub para devolução: {str(e)}"})
-
-    # Etapa 5 – Devolver o arquivo diretamente como download
-    return FileResponse(final_path, media_type="application/dxf", filename="saida.dxf")
+    # ✅ Etapa final – Retornar o link público
+    return JSONResponse(content={
+        "mensagem": "Arquivo modificado com sucesso",
+        "download_url": RAW_URL
+    })
