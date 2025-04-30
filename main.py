@@ -7,7 +7,7 @@ app = FastAPI()
 
 # Dados fixos do repositório e token (provisório, melhor usar variável no Render depois)
 GITHUB_REPO = "lucasjordann/api-ezdxf"
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/contents/saida.dxf"
 
 class DXFUrlRequest(BaseModel):
