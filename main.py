@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import FileResponse
-import ezdxf, shutil, os
+from pydantic import BaseModel
+import ezdxf, shutil, os, requests
 
 app = FastAPI()
 
@@ -17,3 +18,27 @@ async def modificar_dxf(file: UploadFile = File(...)):
     modified_path = os.path.join(temp_dir, f"modificado_{file.filename}")
     doc.saveas(modified_path)
     return FileResponse(modified_path, media_type="application/dxf", filename=f"modificado_{file.filename}")
+
+class DXFUrlRequest(BaseModel):
+    file_url: str
+
+@app.post("/modificar_dxf_url/")
+def modificar_dxf_url(data: DXFUrlRequest):
+    temp_dir = "/tmp/dxf_api"
+    os.makedirs(temp_dir, exist_ok=True)
+    original_path = os.path.join(temp_dir, "baixado.dxf")
+
+    # Baixa o arquivo a partir da URL
+    response = requests.get(data.file_url)
+    with open(original_path, "wb") as f:
+        f.write(response.content)
+
+    # Modifica o DXF
+    doc = ezdxf.readfile(original_path)
+    msp = doc.modelspace()
+    msp.add_text("Texto via URL", dxfattribs={"insert": (100, 100)})
+
+    modified_path = os.path.join(temp_dir, "saida.dxf")
+    doc.saveas(modified_path)
+
+    return FileResponse(modified_path, media_type="application/dxf", filename="saida.dxf")
