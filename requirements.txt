@@ -2,3 +2,4 @@ fastapi
 uvicorn
 ezdxf
 python-multipart
+requests
