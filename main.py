@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import ezdxf, requests, os, base64, re
+import ezdxf, requests, os, base64, re, json
 from datetime import datetime
 import pytz
 from typing import Optional
@@ -10,17 +10,49 @@ app = FastAPI()
 
 GITHUB_REPO = "lucasjordann/api-ezdxf"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+KNOWLEDGE_PATH = "knowledge.jsonl"
 
 class DXFUrlRequest(BaseModel):
     file_url: str
     instrucoes: Optional[str] = None
+
+def registrar_aprendizado(comando: str, detalhes: str):
+    br_tz = pytz.timezone("America/Sao_Paulo")
+    registro = {
+        "comando": comando,
+        "detalhes": detalhes,
+        "timestamp": datetime.now(br_tz).strftime("%Y-%m-%d %H:%M:%S")
+    }
+    with open(KNOWLEDGE_PATH, "a") as f:
+        f.write(json.dumps(registro) + "\n")
+
+def explodir_blocos(msp):
+    blocos_explodidos = 0
+    for entidade in list(msp):
+        if entidade.dxftype() == "INSERT":
+            try:
+                entidades_explodidas = entidade.explode()
+                for nova in entidades_explodidas:
+                    msp.add_entity(nova)
+                msp.delete_entity(entidade)
+                blocos_explodidos += 1
+            except Exception:
+                continue
+    return blocos_explodidos
+
+def mudar_cor_todos(msp, cor: int = 7):
+    alterados = 0
+    for e in msp:
+        if hasattr(e.dxf, "color"):
+            e.dxf.color = cor
+            alterados += 1
+    return alterados
 
 @app.post("/modificar_dxf_url/")
 def modificar_dxf_url(data: DXFUrlRequest):
     temp_dir = "/tmp/dxf_api"
     os.makedirs(temp_dir, exist_ok=True)
 
-    # 🕓 Timestamp com fuso horário do Brasil
     br_tz = pytz.timezone("America/Sao_Paulo")
     timestamp = datetime.now(br_tz).strftime("%Y%m%d_%H%M%S")
     filename = f"saida_{timestamp}.dxf"
@@ -30,7 +62,7 @@ def modificar_dxf_url(data: DXFUrlRequest):
     github_api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
 
-    # 🔽 Etapa 1 – Baixar DXF original
+    # Etapa 1 – Download
     try:
         response = requests.get(data.file_url)
         if response.status_code != 200:
@@ -40,38 +72,31 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Falha ao baixar arquivo: {str(e)}"})
 
-    # 🔽 Etapa 2 – Modificar com ezdxf
+    # Etapa 2 – Modificações
     try:
         doc = ezdxf.readfile(original_path)
         msp = doc.modelspace()
-
-        # Texto padrão para validação visual
         msp.add_text("Texto via API", dxfattribs={"insert": (100, 100)})
 
         if data.instrucoes:
             texto = data.instrucoes.lower()
 
-            # 🎨 Mudar cor das polilinhas
-            match_cor = re.search(r"cor das polilinhas para (\d+)", texto)
+            if "explodir blocos" in texto:
+                total = explodir_blocos(msp)
+                registrar_aprendizado("explodir blocos", f"{total} blocos explodidos")
+
+            match_cor = re.search(r"cor de todos(?: os itens| os objetos)? para (\d+)", texto)
             if match_cor:
                 cor = int(match_cor.group(1))
-                for e in msp:
-                    if e.dxftype() in ("LWPOLYLINE", "POLYLINE"):
-                        e.dxf.color = cor
-
-            # 🔵 Adicionar círculos
-            match_circulos = re.search(r"adicionar (\d+) círculos?", texto)
-            if match_circulos:
-                n = int(match_circulos.group(1))
-                for i in range(n):
-                    msp.add_circle(center=(50 + i*20, 50), radius=5)
+                total = mudar_cor_todos(msp, cor)
+                registrar_aprendizado(f"mudar cor de todos os itens para {cor}", f"{total} entidades alteradas para cor {cor}")
 
         doc.saveas(modified_path)
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erro ao processar/modificar DXF: {str(e)}"})
+        return JSONResponse(status_code=500, content={"error": f"Erro ao processar DXF: {str(e)}"})
 
-    # 🔽 Etapa 3 – Upload para GitHub
+    # Etapa 3 – Upload para GitHub
     try:
         with open(modified_path, "rb") as f:
             content_b64 = base64.b64encode(f.read()).decode()
@@ -95,9 +120,8 @@ def modificar_dxf_url(data: DXFUrlRequest):
             })
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erro durante upload para GitHub: {str(e)}"})
+        return JSONResponse(status_code=500, content={"error": f"Erro durante upload: {str(e)}"})
 
-    # 🔚 Link 100% confiável (raw)
     return JSONResponse(content={
         "mensagem": "Arquivo modificado com sucesso",
         "download_url": raw_url
