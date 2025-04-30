@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import ezdxf, requests, os, base64, re
 from datetime import datetime
+import pytz
 from typing import Optional
 
 app = FastAPI()
@@ -19,14 +20,17 @@ def modificar_dxf_url(data: DXFUrlRequest):
     temp_dir = "/tmp/dxf_api"
     os.makedirs(temp_dir, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 🕓 Timestamp com fuso horário do Brasil
+    br_tz = pytz.timezone("America/Sao_Paulo")
+    timestamp = datetime.now(br_tz).strftime("%Y%m%d_%H%M%S")
     filename = f"saida_{timestamp}.dxf"
+
     original_path = os.path.join(temp_dir, "baixado.dxf")
     modified_path = os.path.join(temp_dir, filename)
     github_api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
 
-    # Etapa 1 – Download do arquivo
+    # 🔽 Etapa 1 – Baixar DXF original
     try:
         response = requests.get(data.file_url)
         if response.status_code != 200:
@@ -36,19 +40,18 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Falha ao baixar arquivo: {str(e)}"})
 
-    # Etapa 2 – Modificar com base nas instruções
+    # 🔽 Etapa 2 – Modificar com ezdxf
     try:
         doc = ezdxf.readfile(original_path)
         msp = doc.modelspace()
 
-        # Instrução fixa para rastreio
+        # Texto padrão para validação visual
         msp.add_text("Texto via API", dxfattribs={"insert": (100, 100)})
 
         if data.instrucoes:
             texto = data.instrucoes.lower()
 
             # 🎨 Mudar cor das polilinhas
-            cor = None
             match_cor = re.search(r"cor das polilinhas para (\d+)", texto)
             if match_cor:
                 cor = int(match_cor.group(1))
@@ -68,7 +71,7 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro ao processar/modificar DXF: {str(e)}"})
 
-    # Etapa 3 – Upload para GitHub
+    # 🔽 Etapa 3 – Upload para GitHub
     try:
         with open(modified_path, "rb") as f:
             content_b64 = base64.b64encode(f.read()).decode()
@@ -94,6 +97,7 @@ def modificar_dxf_url(data: DXFUrlRequest):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro durante upload para GitHub: {str(e)}"})
 
+    # 🔚 Link 100% confiável (raw)
     return JSONResponse(content={
         "mensagem": "Arquivo modificado com sucesso",
         "download_url": raw_url
