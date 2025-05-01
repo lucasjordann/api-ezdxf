@@ -1,12 +1,22 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import ezdxf, requests, os, base64, re, json
+import ezdxf
+import requests
+import os
+import base64
+import re
+import json
 from datetime import datetime
 import pytz
 from typing import Optional, List
 
 app = FastAPI()
+
+# ─── Health check ────────────────────────────────────────────────────────────
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
 
 # ─── Configurações ──────────────────────────────────────────────────────────
 GITHUB_REPO    = "lucasjordann/api-ezdxf"
@@ -24,44 +34,35 @@ class ExecutarComandoRequest(BaseModel):
 
 class Acao(BaseModel):
     tipo: str
-    nome: Optional[str]
-    cor: Optional[int]
-    inicio: Optional[List[float]]
-    fim: Optional[List[float]]
-    layer: Optional[str]
-    vertices: Optional[List[List[float]]]
-    centro: Optional[List[float]]
-    raio: Optional[float]
-    angulo_inicio: Optional[float]
-    angulo_fim: Optional[float]
-    major_axis: Optional[List[float]]
-    minor_radius: Optional[float]
-    major_radius: Optional[float]
-    canto1: Optional[List[float]]
-    canto2: Optional[List[float]]
-    local: Optional[List[float]]
-    direcao: Optional[List[float]]
-    pontos: Optional[List[List[float]]]
-    inner_radius: Optional[float]
-    outer_radius: Optional[float]
-    corners: Optional[List[List[float]]]
-    base: Optional[List[float]]
-    height: Optional[float]
-    turns: Optional[int]
-    contorno: Optional[List[List[float]]]
-    tag: Optional[str]
-    prompt: Optional[str]
-    insert: Optional[List[float]]
-    distance: Optional[float]
-    # transformações complexas comentadas por enquanto
-    # p1: Optional[List[float]]
-    # p2: Optional[List[float]]
-    # dx: Optional[float]
-    # dy: Optional[float]
-    # angle: Optional[float]
-    # center: Optional[List[float]]
-    # scale_x: Optional[float]
-    # scale_y: Optional[float]
+    nome: Optional[str] = None
+    cor: Optional[int] = None
+    inicio: Optional[List[float]] = None
+    fim: Optional[List[float]] = None
+    layer: Optional[str] = None
+    vertices: Optional[List[List[float]]] = None
+    centro: Optional[List[float]] = None
+    raio: Optional[float] = None
+    angulo_inicio: Optional[float] = None
+    angulo_fim: Optional[float] = None
+    major_axis: Optional[List[float]] = None
+    minor_radius: Optional[float] = None
+    major_radius: Optional[float] = None
+    canto1: Optional[List[float]] = None
+    canto2: Optional[List[float]] = None
+    local: Optional[List[float]] = None
+    direcao: Optional[List[float]] = None
+    pontos: Optional[List[List[float]]] = None
+    inner_radius: Optional[float] = None
+    outer_radius: Optional[float]] = None
+    corners: Optional[List[List[float]]] = None
+    base: Optional[List[float]] = None
+    height: Optional[float] = None
+    turns: Optional[int] = None
+    contorno: Optional[List[List[float]]] = None
+    tag: Optional[str] = None
+    prompt: Optional[str] = None
+    insert: Optional[List[float]] = None
+    distance: Optional[float] = None
 
 class ExecutarAcoesRequest(BaseModel):
     file_url: str
@@ -106,11 +107,10 @@ def modificar_dxf_url(data: DXFUrlRequest):
     temp_dir = "/tmp/dxf_api"
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Timestamp Brasília
     ts = datetime.now(pytz.timezone("America/Sao_Paulo")).strftime("%Y%m%d_%H%M%S")
-    filename = f"saida_{ts}.dxf"
-    orig = os.path.join(temp_dir, "baixado.dxf")
-    dest = os.path.join(temp_dir, filename)
+    filename   = f"saida_{ts}.dxf"
+    orig_path  = os.path.join(temp_dir, "baixado.dxf")
+    dest_path  = os.path.join(temp_dir, filename)
     github_api = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
     raw_url    = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
 
@@ -118,12 +118,12 @@ def modificar_dxf_url(data: DXFUrlRequest):
     resp = requests.get(data.file_url)
     if resp.status_code != 200:
         return JSONResponse(status_code=400, content={"error": f"Erro ao baixar: {resp.status_code}"})
-    with open(orig, "wb") as f:
+    with open(orig_path, "wb") as f:
         f.write(resp.content)
 
     # Abrir e modificar
     try:
-        doc = ezdxf.readfile(orig)
+        doc = ezdxf.readfile(orig_path)
         msp = doc.modelspace()
         msp.add_text("Texto via API", dxfattribs={"insert": (100, 100)})
 
@@ -138,17 +138,18 @@ def modificar_dxf_url(data: DXFUrlRequest):
                 n = mudar_cor_todos(msp, c)
                 registrar_aprendizado(f"mudar cor de todos os itens para {c}", f"{n} entidades alteradas")
 
-        doc.saveas(dest)
+        doc.saveas(dest_path)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Erro ao processar DXF: {str(e)}"})
 
     # Upload GitHub
-    with open(dest, "rb") as f:
+    with open(dest_path, "rb") as f:
         content_b64 = base64.b64encode(f.read()).decode()
     put = requests.put(
         github_api,
         json={"message": f"upload {filename}", "content": content_b64, "branch": "main"},
-        headers={"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        headers={"Authorization": f"Bearer {GITHUB_TOKEN}",
+                 "Accept": "application/vnd.github.v3+json"}
     )
     if put.status_code not in (200, 201):
         return JSONResponse(status_code=500, content={"error": "Falha no upload", "detalhes": put.json()})
@@ -163,11 +164,12 @@ def executar_comando(data: ExecutarComandoRequest):
 
     etapas = []
     if os.path.exists(KNOWLEDGE_PATH):
-        for linha in open(KNOWLEDGE_PATH):
-            reg = json.loads(linha)
-            if reg.get("comando") == data.comando and "etapas" in reg:
-                etapas = reg["etapas"]
-                break
+        with open(KNOWLEDGE_PATH) as f:
+            for linha in f:
+                reg = json.loads(linha)
+                if reg.get("comando") == data.comando and reg.get("etapas"):
+                    etapas = reg["etapas"]
+                    break
     if not etapas:
         return JSONResponse(status_code=404, content={"error": f"Comando '{data.comando}' não encontrado"})
 
@@ -176,67 +178,65 @@ def executar_comando(data: ExecutarComandoRequest):
 
 # ─── Endpoint 3: ações CAD detalhadas ────────────────────────────────────────
 @app.post("/executar_acoes/")
-async def executar_acoes_endpoint(req: Request):
+def executar_acoes(data: ExecutarAcoesRequest):
+    temp_dir = "/tmp/dxf_api"
+    os.makedirs(temp_dir, exist_ok=True)
+
+    ts = datetime.now(pytz.timezone("America/Sao_Paulo")).strftime("%Y%m%d_%H%M%S")
+    filename   = f"saida_{ts}.dxf"
+    orig_path  = os.path.join(temp_dir, "baixado.dxf")
+    dest_path  = os.path.join(temp_dir, filename)
+    github_api = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+    raw_url    = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
+
+    # Download
+    resp = requests.get(data.file_url)
+    if resp.status_code != 200:
+        return JSONResponse(status_code=400, content={"error": f"Erro ao baixar: {resp.status_code}"})
+    with open(orig_path, "wb") as f:
+        f.write(resp.content)
+
+    # Abrir DXF
     try:
-        data = await req.json()
-        file_url = data.get("file_url")
-        acoes    = data.get("acoes", [])
-        if not file_url or not isinstance(acoes, list):
-            return JSONResponse(status_code=400, content={"error": "'file_url' e 'acoes' obrigatórios"})
-
-        # Preparar paths
-        temp_dir = "/tmp/dxf_api"; os.makedirs(temp_dir, exist_ok=True)
-        ts       = datetime.now(pytz.timezone("America/Sao_Paulo")).strftime("%Y%m%d_%H%M%S")
-        filename = f"saida_{ts}.dxf"
-        orig     = os.path.join(temp_dir, "baixado.dxf")
-        dest     = os.path.join(temp_dir, filename)
-        github_api = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
-        raw_url    = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
-
-        # Download
-        resp = requests.get(file_url)
-        if resp.status_code != 200:
-            return JSONResponse(status_code=400, content={"error": f"Erro ao baixar: {resp.status_code}"})
-        with open(orig, "wb") as f:
-            f.write(resp.content)
-
-        # Abrir DXF
-        doc = ezdxf.readfile(orig)
+        doc = ezdxf.readfile(orig_path)
         msp = doc.modelspace()
 
         # Executar ações
-        for ac in acoes:
-            tipo = ac.get("tipo", "").lower()
+        for ac in data.acoes:
+            tipo = ac.tipo.lower()
 
-            # criar layer
-            if tipo == "criar_layer" and ac.get("nome"):
-                if ac["nome"] not in doc.layers:
-                    doc.layers.new(name=ac["nome"], dxfattribs={"color": ac.get("cor", 7)})
-                    msp.add_point((0, 0), dxfattribs={"layer": ac["nome"]})
+            if tipo == "criar_layer" and ac.nome:
+                if ac.nome not in doc.layers:
+                    doc.layers.new(name=ac.nome, dxfattribs={"color": ac.cor or 7})
+                    msp.add_point((0, 0), dxfattribs={"layer": ac.nome})
 
-            # básicas
-            elif tipo in ("line", "desenhar_linha"):
-                msp.add_line(tuple(ac["inicio"]), tuple(ac["fim"]), dxfattribs={"layer": ac["layer"]})
-            elif tipo in ("circle", "desenhar_circulo"):
-                msp.add_circle(tuple(ac["centro"]), ac["raio"], dxfattribs={"layer": ac["layer"]})
+            elif tipo in ("line", "desenhar_linha") and ac.inicio and ac.fim:
+                msp.add_line(tuple(ac.inicio), tuple(ac.fim), dxfattribs={"layer": ac.layer or "0"})
 
-            # (adicione aqui outras entidades conforme necessidade)...
+            elif tipo in ("circle", "desenhar_circulo") and ac.centro and ac.raio is not None:
+                msp.add_circle(tuple(ac.centro), ac.raio, dxfattribs={"layer": ac.layer or "0"})
 
-        # Salvar alterações
-        doc.saveas(dest)
+            # … outros tipos de entidades conforme necessário …
 
+        doc.saveas(dest_path)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": "Internal Server Error", "detalhes": str(e)})
+        return JSONResponse(status_code=500, content={"error": "Erro ao processar ações", "detalhes": str(e)})
 
     # Upload
-    with open(dest, "rb") as f:
+    with open(dest_path, "rb") as f:
         content_b64 = base64.b64encode(f.read()).decode()
     put = requests.put(
         github_api,
         json={"message": f"upload {filename}", "content": content_b64, "branch": "main"},
-        headers={"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        headers={"Authorization": f"Bearer {GITHUB_TOKEN}",
+                 "Accept": "application/vnd.github.v3+json"}
     )
     if put.status_code not in (200, 201):
         return JSONResponse(status_code=500, content={"error": "Falha no upload", "detalhes": put.json()})
 
     return JSONResponse(content={"mensagem": "Arquivo modificado com sucesso", "download_url": raw_url})
+
+# ─── Run local (opcional) ───────────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
