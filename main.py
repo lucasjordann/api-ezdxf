@@ -8,52 +8,17 @@ from typing import Optional, List
 
 app = FastAPI()
 
-GITHUB_REPO = "lucasjordann/api-ezdxf"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+# ─── Configurações ──────────────────────────────────────────────────────────
+GITHUB_REPO   = "lucasjordann/api-ezdxf"
+GITHUB_TOKEN  = os.getenv("GITHUB_TOKEN")
 KNOWLEDGE_PATH = "knowledge.jsonl"
 
-class Acao(BaseModel):
-    tipo: str
-    nome: Optional[str] = None
-    cor: Optional[int] = None
-    inicio: Optional[List[float]] = None
-    fim: Optional[List[float]] = None
-    layer: Optional[str] = None
-    vertices: Optional[List[List[float]]] = None
-    centro: Optional[List[float]] = None
-    raio: Optional[float] = None
-    angulo_inicio: Optional[float] = None
-    angulo_fim: Optional[float] = None
-    major_axis: Optional[List[float]] = None
-    minor_radius: Optional[float] = None
-    major_radius: Optional[float] = None
-    canto1: Optional[List[float]] = None
-    canto2: Optional[List[float]] = None
-    local: Optional[List[float]] = None
-    direcao: Optional[List[float]] = None
-    corners: Optional[List[List[float]]] = None
-    inner_radius: Optional[float] = None
-    outer_radius: Optional[float] = None
-    pontos: Optional[List[List[float]]] = None
-    tag: Optional[str] = None
-    prompt: Optional[str] = None
-    insert: Optional[List[float]] = None
-    distance: Optional[float] = None
-    dx: Optional[float] = None
-    dy: Optional[float] = None
-    angle: Optional[float] = None
-    center: Optional[List[float]] = None
-    scale_x: Optional[float] = None
-    scale_y: Optional[float] = None
-
-class DXFAcaoRequest(BaseModel):
-    file_url: str
-    acoes: List[Acao]
-
+# ─── Modelos Pydantic ────────────────────────────────────────────────────────
 class DXFUrlRequest(BaseModel):
     file_url: str
     instrucoes: Optional[str] = None
 
+# ─── Helpers de aprendizado ─────────────────────────────────────────────────
 def registrar_aprendizado(comando: str, detalhes: str):
     br_tz = pytz.timezone("America/Sao_Paulo")
     registro = {
@@ -64,149 +29,228 @@ def registrar_aprendizado(comando: str, detalhes: str):
     with open(KNOWLEDGE_PATH, "a") as f:
         f.write(json.dumps(registro) + "\n")
 
+# ─── Funções CAD básicas ────────────────────────────────────────────────────
 def explodir_blocos(msp):
-    blocos_explodidos = 0
-    for entidade in list(msp):
-        if entidade.dxftype() == "INSERT":
+    count = 0
+    for ent in list(msp):
+        if ent.dxftype() == "INSERT":
             try:
-                entidades_explodidas = entidade.explode()
-                for nova in entidades_explodidas:
-                    msp.add_entity(nova)
-                msp.delete_entity(entidade)
-                blocos_explodidos += 1
+                for o in ent.explode():
+                    msp.add_entity(o)
+                msp.delete_entity(ent)
+                count += 1
             except Exception:
-                continue
-    return blocos_explodidos
+                pass
+    return count
 
-def mudar_cor_todos(msp, cor: int = 7):
+def mudar_cor_todos(msp, cor:int=7):
     alterados = 0
-    for e in msp:
-        if hasattr(e.dxf, "color"):
-            e.dxf.color = cor
+    for ent in msp:
+        if hasattr(ent.dxf, "color"):
+            ent.dxf.color = cor
             alterados += 1
     return alterados
 
-def executar_acoes(doc, msp, acoes: List[Acao]):
-    from ezdxf.math import mirror_matrix, Matrix44
-
-    for acao in acoes:
-        tipo = acao.tipo.lower()
-        # Layers
-        if tipo == "criar_layer" and acao.nome:
-            if acao.nome not in doc.layers:
-                doc.layers.new(name=acao.nome, dxfattribs={"color": acao.cor or 7})
-                msp.add_point((0, 0), dxfattribs={"layer": acao.nome})
-        # Entidades Básicas
-        elif tipo in ("line", "desenhar_linha") and acao.inicio and acao.fim:
-            msp.add_line(tuple(acao.inicio), tuple(acao.fim), dxfattribs={"layer": acao.layer})
-        elif tipo in ("pline", "polylinha") and acao.vertices:
-            msp.add_lwpolyline([tuple(v) for v in acao.vertices], dxfattribs={"layer": acao.layer})
-        elif tipo in ("circle", "desenhar_circulo") and acao.centro and acao.raio is not None:
-            msp.add_circle(tuple(acao.centro), acao.raio, dxfattribs={"layer": acao.layer})
-        elif tipo in ("arc", "desenhar_arco") and acao.centro and acao.raio is not None:
-            msp.add_arc(tuple(acao.centro), acao.raio,
-                        acao.angulo_inicio or 0, acao.angulo_fim or 360,
-                        dxfattribs={"layer": acao.layer})
-        elif tipo in ("ellipse", "desenhar_elipse") and acao.centro and acao.major_axis:
-            ratio = (acao.minor_radius or 0) / (acao.major_radius or 1)
-            msp.add_ellipse(center=tuple(acao.centro),
-                            major_axis=tuple(acao.major_axis),
-                            ratio=ratio,
-                            dxfattribs={"layer": acao.layer})
-        elif tipo in ("rectangle", "desenhar_retangulo") and acao.canto1 and acao.canto2:
-            x1,y1 = acao.canto1; x2,y2 = acao.canto2
-            pts = [(x1,y1),(x2,y1),(x2,y2),(x1,y2),(x1,y1)]
-            msp.add_lwpolyline(pts, dxfattribs={"layer": acao.layer})
-        elif tipo in ("point", "desenhar_ponto") and acao.local:
-            msp.add_point(tuple(acao.local), dxfattribs={"layer": acao.layer})
-        elif tipo == "ray" and acao.inicio and acao.direcao:
-            msp.add_ray(tuple(acao.inicio), tuple(acao.direcao), dxfattribs={"layer": acao.layer})
-        elif tipo == "xline" and acao.inicio and acao.direcao:
-            msp.add_xline(tuple(acao.inicio), tuple(acao.direcao), dxfattribs={"layer": acao.layer})
-        elif tipo in ("mline", "multiline") and acao.vertices:
-            msp.add_mline([tuple(v) for v in acao.vertices], override={"color": acao.cor or 7})
-        # Entidades Avançadas
-        elif tipo == "spline" and acao.pontos:
-            msp.add_spline(control_points=[tuple(p) for p in acao.pontos], dxfattribs={"layer": acao.layer})
-        elif tipo == "hatch" and acao.vertices:
-            hatch = msp.add_hatch(color=acao.cor or 7)
-            hatch.paths.add_polyline_path([tuple(v) for v in acao.vertices], is_closed=True)
-        elif tipo == "region" and acao.vertices:
-            region = doc.entities.new("REGION")
-            region.append_polygon([tuple(v) for v in acao.vertices])
-        elif tipo == "donut" and acao.inner_radius is not None and acao.outer_radius is not None:
-            msp.add_donut(acao.inner_radius, acao.outer_radius, dxfattribs={"layer": acao.layer})
-        elif tipo == "solid" and acao.vertices:
-            msp.add_solid([tuple(v) for v in acao.vertices], dxfattribs={"layer": acao.layer})
-        elif tipo == "trace" and acao.corners:
-            msp.add_trace(*acao.corners, dxfattribs={"layer": acao.layer})
-        elif tipo == "helix" and acao.centro and hasattr(acao, 'height'):
-            msp.add_helix(base=tuple(acao.centro), height=acao.height, turns=acao.turns, dxfattribs={"layer": acao.layer})
-        elif tipo == "wipeout" and acao.contorno:
-            msp.add_wipeout([tuple(v) for v in acao.contorno], dxfattribs={"layer": acao.layer})
-        elif tipo == "attdef" and acao.tag and acao.prompt and acao.insert:
-            msp.add_attdef(tag=acao.tag, prompt=acao.prompt, insert=tuple(acao.insert), dxfattribs={"layer": acao.layer})
-        # Edição de Geometria
-        elif tipo == "offset" and acao.layer and acao.distance is not None:
-            for e in list(msp):
-                if e.dxf.layer == acao.layer:
-                    e.offset(acao.distance)
-        elif tipo == "explode":
-            for e in list(msp):
-                if e.dxftype() in ("INSERT","LWPOLYLINE","HATCH"):
-                    try:
-                        for o in e.explode():
-                            msp.add_entity(o)
-                        msp.delete_entity(e)
-                    except Exception:
-                        continue
-        elif tipo == "mirror" and acao.inicio and acao.direcao:
-            mat = mirror_matrix(tuple(acao.inicio), tuple(acao.direcao))
-            doc.transform(mat)
-        elif tipo == "move" and acao.dx is not None and acao.dy is not None:
-            m = Matrix44.translate(acao.dx, acao.dy, 0)
-            doc.transform(m)
-        elif tipo == "rotate" and acao.angle is not None and acao.center:
-            m = Matrix44.z_rotate(acao.angle, axis=tuple(acao.center))
-            doc.transform(m)
-        elif tipo == "scale" and acao.scale_x is not None and acao.scale_y is not None:
-            m = Matrix44.scale(acao.scale_x, acao.scale_y, 1.0)
-            doc.transform(m)
-
-@app.post("/executar_acoes/")
-def executar_acoes_dxf(data: DXFAcaoRequest):
+# ─── Endpoint 1: texto livre (“/modificar_dxf_url/”) ─────────────────────────
+@app.post("/modificar_dxf_url/")
+def modificar_dxf_url(data: DXFUrlRequest):
     temp_dir = "/tmp/dxf_api"
     os.makedirs(temp_dir, exist_ok=True)
-    br_tz = pytz.timezone("America/Sao_Paulo")
-    timestamp = datetime.now(br_tz).strftime("%Y%m%d_%H%M%S")
-    filename = f"saida_{timestamp}.dxf"
+
+    # timestamp BR
+    br_tz    = pytz.timezone("America/Sao_Paulo")
+    ts       = datetime.now(br_tz).strftime("%Y%m%d_%H%M%S")
+    filename = f"saida_{ts}.dxf"
+
     original_path = os.path.join(temp_dir, "baixado.dxf")
     modified_path = os.path.join(temp_dir, filename)
-    github_api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
-    try:
-        response = requests.get(data.file_url)
-        if response.status_code != 200:
-            return JSONResponse(status_code=400, content={"error": f"Erro ao baixar: status {response.status_code}"})
-        with open(original_path, "wb") as f:
-            f.write(response.content)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Falha ao baixar arquivo: {str(e)}"})
+    github_api   = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+    raw_url      = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
+
+    # 1) download
+    resp = requests.get(data.file_url)
+    if resp.status_code != 200:
+        return JSONResponse(status_code=400, content={"error":f"Erro ao baixar: {resp.status_code}"})
+    with open(original_path,"wb") as f: f.write(resp.content)
+
+    # 2) abrir e modificar
     try:
         doc = ezdxf.readfile(original_path)
         msp = doc.modelspace()
-        executar_acoes(doc, msp, data.acoes)
+        msp.add_text("Texto via API", dxfattribs={"insert":(100,100)})
+
+        if data.instrucoes:
+            txt = data.instrucoes.lower()
+            if "explodir blocos" in txt:
+                n = explodir_blocos(msp)
+                registrar_aprendizado("explodir blocos", f"{n} blocos explodidos")
+            m = re.search(r"cor de todos(?: os itens| os objetos)? para (\d+)", txt)
+            if m:
+                c = int(m.group(1))
+                n = mudar_cor_todos(msp,c)
+                registrar_aprendizado(f"mudar cor de todos os itens para {c}", f"{n} entidades alteradas")
         doc.saveas(modified_path)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erro ao modificar DXF: {str(e)}"})
+        return JSONResponse(status_code=500, content={"error":f"Erro ao processar DXF: {e}"})
+
+    # 3) upload GitHub
+    with open(modified_path,"rb") as f:
+        content_b64 = base64.b64encode(f.read()).decode()
+    headers = {"Authorization":f"Bearer {GITHUB_TOKEN}", "Accept":"application/vnd.github.v3+json"}
+    payload = {"message":f"upload {filename}", "content":content_b64, "branch":"main"}
+    put = requests.put(github_api, json=payload, headers=headers)
+    if put.status_code not in (200,201):
+        return JSONResponse(status_code=500, content={"error":"Falha no upload","detalhes":put.json()})
+
+    return JSONResponse(content={"mensagem":"Arquivo modificado com sucesso","download_url":raw_url})
+
+# ─── Endpoint 2: executar comando aprendido (“/executar_comando/”) ───────────
+@app.post("/executar_comando/")
+def executar_comando(data: dict):
+    file_url = data.get("file_url")
+    comando  = data.get("comando")
+    if not file_url or not comando:
+        return JSONResponse(status_code=400, content={"error":"'file_url' e 'comando' são obrigatórios"})
+
+    # ler knowledge.jsonl
+    etapas=[]
+    if os.path.exists(KNOWLEDGE_PATH):
+        for linha in open(KNOWLEDGE_PATH):
+            reg = json.loads(linha)
+            if reg.get("comando")==comando and "etapas" in reg:
+                etapas = reg["etapas"]
+                break
+    if not etapas:
+        return JSONResponse(status_code=404, content={"error":f"Comando '{comando}' não encontrado"})
+
+    instr = ", ".join(etapas)
+    return modificar_dxf_url(DXFUrlRequest(file_url=file_url, instrucoes=instr))
+
+# ─── Endpoint 3: executar ações CAD detalhadas (“/executar_acoes/”) ────────────
+@app.post("/executar_acoes/")
+def executar_acoes_endpoint(request: Request):
+    data = request.json()
+    file_url = data.get("file_url")
+    acoes    = data.get("acoes", [])
+    if not file_url or not isinstance(acoes, list):
+        return JSONResponse(status_code=400, content={"error":"'file_url' e 'acoes' são obrigatórios"})
+
+    # download
+    temp_dir = "/tmp/dxf_api"
+    os.makedirs(temp_dir, exist_ok=True)
+    br_tz    = pytz.timezone("America/Sao_Paulo")
+    ts       = datetime.now(br_tz).strftime("%Y%m%d_%H%M%S")
+    filename = f"saida_{ts}.dxf"
+    orig     = os.path.join(temp_dir,"baixado.dxf")
+    dest     = os.path.join(temp_dir,filename)
+    github_api = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+    raw_url    = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{filename}"
+
+    resp = requests.get(file_url)
+    if resp.status_code!=200:
+        return JSONResponse(status_code=400, content={"error":f"Erro ao baixar: {resp.status_code}"})
+    with open(orig,"wb") as f: f.write(resp.content)
+
+    # abrir
     try:
-        with open(modified_path, "rb") as f:
-            content_b64 = base64.b64encode(f.read()).decode()
-        headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-        payload = {"message": f"upload {filename}", "content": content_b64, "branch": "main"}
-        put_resp = requests.put(github_api_url, json=payload, headers=headers)
-        if put_resp.status_code not in [200, 201]:
-            return JSONResponse(status_code=500, content={"error": "Erro ao fazer upload para GitHub", "detalhes": put_resp.json()})
+        doc = ezdxf.readfile(orig)
+        msp = doc.modelspace()
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Erro durante upload: {str(e)}"})
-    return JSONResponse(content={"mensagem": "Arquivo modificado com sucesso", "download_url": raw_url})
+        return JSONResponse(status_code=500, content={"error":f"Falha ao abrir DXF: {e}"})
+
+    # executar cada ação
+    from ezdxf.math import mirror_matrix, Matrix44
+    from ezdxf.entities import MLine
+
+    for acao in acoes:
+        tipo = acao.get("tipo","").lower()
+
+        # Layers
+        if tipo=="criar_layer" and acao.get("nome"):
+            if acao["nome"] not in doc.layers:
+                doc.layers.new(name=acao["nome"], dxfattribs={"color":acao.get("cor",7)})
+                msp.add_point((0,0), dxfattribs={"layer":acao["nome"]})
+
+        # Básicas
+        elif tipo in ("line","desenhar_linha"):
+            msp.add_line(tuple(acao["inicio"]),tuple(acao["fim"]),dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("pline","polylinha"):
+            msp.add_lwpolyline([tuple(v) for v in acao["vertices"]],dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("circle","desenhar_circulo"):
+            msp.add_circle(tuple(acao["centro"]),acao["raio"],dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("arc","desenhar_arco"):
+            msp.add_arc(tuple(acao["centro"]),acao["raio"],
+                        acao["angulo_inicio"],acao["angulo_fim"],
+                        dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("ellipse","desenhar_elipse"):
+            major = tuple(acao["major_axis"])
+            ratio = acao["minor_radius"]/acao["major_radius"]
+            msp.add_ellipse(center=tuple(acao["centro"]),
+                            major_axis=major,ratio=ratio,
+                            dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("rectangle","desenhar_retangulo"):
+            x1,y1=acao["canto1"];x2,y2=acao["canto2"]
+            pts=[(x1,y1),(x2,y1),(x2,y2),(x1,y2),(x1,y1)]
+            msp.add_lwpolyline(pts,dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("point","desenhar_ponto"):
+            msp.add_point(tuple(acao["local"]),dxfattribs={"layer":acao["layer"]})
+        elif tipo=="ray":
+            msp.add_ray(tuple(acao["inicio"]),tuple(acao["direcao"]),dxfattribs={"layer":acao["layer"]})
+        elif tipo=="xline":
+            msp.add_xline(tuple(acao["inicio"]),tuple(acao["direcao"]),dxfattribs={"layer":acao["layer"]})
+        elif tipo in ("mline","multiline"):
+            msp.add_mline([tuple(v) for v in acao["vertices"]],override={"color":acao.get("cor",7)})
+
+        # Avançadas
+        elif tipo=="spline":
+            msp.add_spline(control_points=[tuple(p) for p in acao["pontos"]],dxfattribs={"layer":acao["layer"]})
+        elif tipo=="hatch":
+            hatch=msp.add_hatch(color=acao.get("cor",7))
+            hatch.paths.add_polyline_path([tuple(v) for v in acao["vertices"]],is_closed=True)
+        elif tipo=="region":
+            reg=doc.entities.new("REGION"); reg.append_polygon([tuple(v) for v in acao["vertices"]])
+        elif tipo=="donut":
+            msp.add_donut(acao["inner_radius"],acao["outer_radius"],dxfattribs={"layer":acao["layer"]})
+        elif tipo=="solid":
+            msp.add_solid([tuple(v) for v in acao["vertices"]],dxfattribs={"layer":acao["layer"]})
+        elif tipo=="trace":
+            msp.add_trace(*acao["corners"],dxfattribs={"layer":acao["layer"]})
+        elif tipo=="helix":
+            msp.add_helix(base=tuple(acao["base"]),height=acao["height"],turns=acao["turns"],dxfattribs={"layer":acao["layer"]})
+        elif tipo=="wipeout":
+            msp.add_wipeout([tuple(v) for v in acao["contorno"]],dxfattribs={"layer":acao["layer"]})
+        elif tipo=="attdef":
+            msp.add_attdef(tag=acao["tag"],prompt=acao["prompt"],insert=tuple(acao["insert"]),dxfattribs={"layer":acao["layer"]})
+
+        # Geometria
+        elif tipo=="offset":
+            for e in list(msp):
+                if e.dxf.layer==acao["layer"]:
+                    e.offset(acao["distance"])
+        elif tipo=="explode":
+            for e in list(msp):
+                if e.dxftype() in ("INSERT","LWPOLYLINE","HATCH"):
+                    try:
+                        for o in e.explode(): msp.add_entity(o)
+                        msp.delete_entity(e)
+                    except Exception: pass
+        elif tipo=="mirror":
+            mat=mirror_matrix(tuple(acao["p1"]),tuple(acao["p2"])); doc.transform(mat)
+        elif tipo=="move":
+            m=Matrix44.translate(acao["dx"],acao["dy"],0); doc.transform(m)
+        elif tipo=="rotate":
+            m=Matrix44.z_rotate(acao["angle"],axis=tuple(acao["center"])); doc.transform(m)
+        elif tipo=="scale":
+            m=Matrix44.scale(acao["scale_x"],acao["scale_y"],1.0); doc.transform(m)
+
+    # salvar
+    doc.saveas(dest)
+
+    # upload GitHub
+    with open(dest,"rb") as f: content_b64=base64.b64encode(f.read()).decode()
+    put = requests.put(github_api, json={"message":f"upload {filename}","content":content_b64,"branch":"main"},
+                      headers={"Authorization":f"Bearer {GITHUB_TOKEN}","Accept":"application/vnd.github.v3+json"})
+    if put.status_code not in (200,201):
+        return JSONResponse(status_code=500,content={"error":"Falha upload","detalhes":put.json()})
+
+    return JSONResponse(content={"mensagem":"Arquivo modificado com sucesso","download_url":raw_url})
