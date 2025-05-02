@@ -53,7 +53,7 @@ class Acao(BaseModel):
     direcao: Optional[List[float]] = None
     pontos: Optional[List[List[float]]] = None
     inner_radius: Optional[float] = None
-    outer_radius: Optional[float]] = None
+    outer_radius: Optional[float] = None
     corners: Optional[List[List[float]]] = None
     base: Optional[List[float]] = None
     height: Optional[float] = None
